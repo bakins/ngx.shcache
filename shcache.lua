@@ -23,6 +23,18 @@ local function _get_default_lock_options()
    }
 end
 
+local crc32 =  ngx.crc32_short
+
+local function _get_shdict(self, key)
+   local shdict = self.shdict
+   if type(shdict) == "table" then
+      local h = crc32(key)
+      return shdict[ (h % #shdict ) + 1 ]
+   else
+      return shdict
+   end
+end
+
 local conf = require("conf")
 if conf then
    DEFAULT_NEGATIVE_TTL = conf.DEFAULT_NEGATIVE_TTL or DEFAULT_NEGATIVE_TTL
@@ -126,8 +138,17 @@ end
 --   * opts.name            : if shcache object is named, it will automatically
 --                            register itself in ngx.ctx.shcache (useful for logging).
 local function new(self, shdict, callbacks, opts)
-   if not shdict then
-      return nil, "shdict does not exist"
+   if type(shdict) == "table" then
+      for i=1,#shdict do
+         if not shdict[i] then
+	    return nil, "shdict does not exist"
+	 end
+	 shdict.n = #shdict
+      end
+   else
+      if not shdict then
+         return nil, "shdict does not exist"
+      end
    end
 
    -- check that callbacks.external_lookup is set
@@ -230,8 +251,8 @@ local function _set(self, ...)
       local key, data, ttl, flags = unpack({...})
       print("saving key: ", key, ", for: ", ttl)
    end
-
-   local ok, err = self.shdict:set(...)
+   local shdict = _get_shdict(self, key)
+   local ok, err = shdict:set(...)
    if not ok then
       local key, data, ttl, flags = unpack({...})
       ngx.log(ngx.ERR, 'failed to set key: ', key, ', err: ', err)
@@ -294,7 +315,8 @@ end
 local function _get(self, key)
    -- always call get_stale() as it does not free element
    -- like get does on each call
-   local data, flags, stale = self.shdict:get_stale(key)
+   local shdict = _get_shdict(self, key)
+   local data, flags, stale = shdict:get_stale(key)
 
    if data and stale then
       if DEBUG then
